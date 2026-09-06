@@ -1,0 +1,42 @@
+# Render Blueprint — one web service that runs the API and serves the built client.
+# In Render: New + -> Blueprint -> pick this repo. It reads this file.
+# You'll be prompted for the secrets marked `sync: false`.
+#
+# Docs: https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: builders-brew
+    runtime: node
+    region: singapore        # closest Render region to Sri Lanka; also: oregon, ohio, frankfurt
+    plan: starter            # always-on (~$7/mo). Use `free` to trial — it sleeps after ~15 min idle.
+    numInstances: 1          # keep at 1: the campaign queue runs in-process
+    healthCheckPath: /api/health
+    buildCommand: npm run install:all && npm run build --prefix client
+    startCommand: npm run start --prefix server
+    autoDeploy: true         # redeploy on every push to the connected branch
+    envVars:
+      # Serve client/dist from this same service — no separate frontend host.
+      - key: SERVE_CLIENT
+        value: "true"
+      # Render sets NODE_ENV=production, which makes npm skip devDependencies.
+      # vite + the Tailwind plugin live there, so the client build needs this.
+      - key: NPM_CONFIG_PRODUCTION
+        value: "false"
+      - key: JWT_EXPIRES_IN
+        value: 1d
+      - key: SMS_ENABLED
+        value: "true"
+      # Strong random value generated once by Render and kept across deploys.
+      - key: JWT_SECRET
+        generateValue: true
+      # Entered in the Render dashboard, never stored in this file / git.
+      - key: MONGODB_URI
+        sync: false
+      - key: NOTIFY_USER_ID
+        sync: false
+      - key: NOTIFY_API_KEY
+        sync: false
+      - key: NOTIFY_SENDER_ID
+        sync: false
+      # PORT is injected by Render automatically — do not set it here.

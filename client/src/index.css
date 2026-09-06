@@ -1,0 +1,211 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink-950: #14110d;
+  --color-ink-900: #1e1812;
+  --color-ink-800: #29221a;
+  --color-ink-700: #3a2f22;
+
+  --color-gold-900: #5c4830;
+  --color-gold-700: #8a6d45;
+  --color-gold-500: #ad8b5b;
+  --color-gold-300: #d4b98a;
+  --color-gold-100: #e8dcc7;
+
+  --color-cream-50: #f7f1e4;
+  --color-cream-200: #e4d9c3;
+  --color-muted: #a89b85;
+
+  --color-success: #7fa65b;
+  --color-error: #c0463c;
+
+  --font-display: "Fraunces", Georgia, serif;
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+
+  --animate-fade-up: fade-up 0.55s ease-out both;
+  --animate-soft-pulse: soft-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes soft-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+:root {
+  --ink-950: #14110d;
+  --ink-900: #1e1812;
+  --ink-800: #29221a;
+  --ink-700: #3a2f22;
+  --gold-900: #5c4830;
+  --gold-700: #8a6d45;
+  --gold-500: #ad8b5b;
+  --gold-300: #d4b98a;
+  --gold-100: #e8dcc7;
+  --cream-50: #f7f1e4;
+  --cream-200: #e4d9c3;
+  --muted: #a89b85;
+  --success: #7fa65b;
+  --error: #c0463c;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: var(--ink-950);
+  color: var(--cream-50);
+  -webkit-font-smoothing: antialiased;
+}
+
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, rgba(173, 139, 91, 0.18), transparent 55%),
+    radial-gradient(ellipse 60% 40% at 100% 100%, rgba(92, 72, 48, 0.25), transparent 50%),
+    linear-gradient(180deg, #18140f 0%, var(--ink-950) 40%, #100e0b 100%);
+}
+
+#root {
+  position: relative;
+  z-index: 1;
+}
+
+::selection {
+  background: var(--gold-700);
+  color: var(--cream-50);
+}
+
+input,
+button,
+textarea,
+select {
+  font: inherit;
+}
+
+.plate-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.9rem;
+  border-radius: 999px;
+  background: var(--gold-900);
+  color: var(--gold-100);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.btn-gold {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 3rem;
+  padding: 0.75rem 1.4rem;
+  border: none;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--gold-500), var(--gold-700));
+  color: var(--ink-950);
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, filter 0.15s ease, opacity 0.15s ease;
+}
+
+.btn-gold:hover:not(:disabled) {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.btn-gold:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3rem;
+  padding: 0.75rem 1.25rem;
+  border: 1px solid var(--ink-700);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--cream-200);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.btn-ghost:hover {
+  border-color: var(--gold-700);
+  background: rgba(173, 139, 91, 0.08);
+}
+
+.field {
+  width: 100%;
+  min-height: 3rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--ink-700);
+  border-radius: 0.9rem;
+  background: var(--ink-900);
+  color: var(--cream-50);
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.field:focus {
+  border-color: var(--gold-500);
+  box-shadow: 0 0 0 3px rgba(173, 139, 91, 0.18);
+}
+
+.field::placeholder {
+  color: var(--muted);
+}
+
+.surface {
+  background: color-mix(in srgb, var(--ink-900) 92%, transparent);
+  border: 1px solid var(--ink-700);
+  border-radius: 1.25rem;
+}
+
+.progress-track {
+  height: 0.45rem;
+  border-radius: 999px;
+  background: var(--ink-700);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--gold-700), var(--gold-300));
+  transition: width 0.5s ease;
+}

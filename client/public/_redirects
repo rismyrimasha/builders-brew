@@ -1,0 +1,4 @@
+# SPA fallback for Netlify / Cloudflare Pages: every path serves index.html
+# so client-side routes (/admin/..., /staff/...) work on refresh or direct open.
+# Vite copies this file to dist/ on build.
+/*  /index.html  200

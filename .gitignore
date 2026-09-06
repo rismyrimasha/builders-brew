@@ -1,0 +1,15 @@
+node_modules/
+dist/
+client/dist/
+
+# Secrets / local env — never commit. Templates (*.env.example) are tracked.
+.env
+.env.*
+!.env.example
+server/.env
+
+# Tooling
+.vercel
+*.local
+.DS_Store
+*.log
