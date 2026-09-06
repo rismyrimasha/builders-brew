@@ -8,7 +8,7 @@ import { BrandMark, ErrorBanner, PlateTag } from '../../components/ui';
 export default function StaffLogin({ admin = false }) {
   const { staffToken, staff, setStaffSession } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState(admin ? 'admin@buildersbrew.pk' : 'staff@buildersbrew.pk');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -61,6 +61,8 @@ export default function StaffLogin({ admin = false }) {
           <input
             className="field"
             type="email"
+            autoComplete="username"
+            placeholder="you@buildersbrew.lk"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             required
@@ -90,15 +92,6 @@ export default function StaffLogin({ admin = false }) {
         >
           {admin ? 'Staff login' : 'Admin login'}
         </Link>
-      </p>
-
-      <p className="mt-4 rounded-xl border border-ink-700 bg-ink-900/80 px-4 py-3 text-sm text-muted">
-        Demo {admin ? 'admin' : 'staff'}:{' '}
-        <span className="text-cream-200">
-          {admin ? 'admin@buildersbrew.pk' : 'staff@buildersbrew.pk'}
-        </span>
-        {' / '}
-        <span className="text-cream-200">{admin ? 'Admin@123' : 'Staff@123'}</span>
       </p>
     </div>
   );
