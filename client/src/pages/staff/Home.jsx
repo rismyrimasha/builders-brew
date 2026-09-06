@@ -110,7 +110,7 @@ export default function StaffHome() {
 
   return (
     <div className="mx-auto min-h-dvh max-w-3xl px-4 py-6">
-      <header className="flex items-start justify-between gap-3">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <PlateTag>Counter</PlateTag>
           <div className="mt-2">
@@ -118,7 +118,7 @@ export default function StaffHome() {
           </div>
           <p className="mt-1 text-muted">Signed in as {staff?.name}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2">
           {isAdminRole(staff?.role) && (
             <Link to="/admin" className="btn-ghost !min-h-11 text-sm">
               Admin
