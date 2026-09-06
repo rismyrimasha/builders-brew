@@ -5,6 +5,10 @@ import { isSmsEnabled, sendSms } from './notifyLk.js';
 
 const MAX_SMS_CHARS = 621;
 
+// SMS has no rich text, so "bold" = ALL CAPS for the brand and reward names.
+// (Unicode bold glyphs would force the costlier UCS-2 encoding — avoided.)
+const BRAND = 'BUILDERS BREW';
+
 function firstName(name) {
   const part = String(name || '').trim().split(/\s+/)[0];
   return part || 'there';
@@ -63,7 +67,7 @@ function composeOrderRewardLine({ total, profile, settings }) {
         cost,
         short: Number.isFinite(t.points_short) ? t.points_short : Math.max(0, cost - total),
         affordable: t.affordable ?? total >= cost,
-        label: rewardLabel(t.menu_item?.name || t.cash_credit?.name || `${cost} pt reward`),
+        label: rewardLabel(t.menu_item?.name || t.cash_credit?.name || `${cost} pt reward`).toUpperCase(),
       };
     })
     .sort((a, b) => a.cost - b.cost);
@@ -108,7 +112,7 @@ export function composeOrderSms({ customer, pointsEarned, profile, settings }) {
   const total = profile?.balance?.available ?? 0;
 
   const lines = [
-    `Dear ${name}, thank you for your order at Builders Brew.`,
+    `Dear ${name}, thank you for your order at ${BRAND}.`,
     `You earned ${pointsWord(pointsEarned)}. Your total is now ${total}.`,
   ];
 
@@ -120,11 +124,11 @@ export function composeOrderSms({ customer, pointsEarned, profile, settings }) {
 
 export function composeRedemptionSms({ customer, reward, balance }) {
   const name = firstName(customer?.name);
-  const label = rewardLabel(reward?.name || 'reward');
+  const label = rewardLabel(reward?.name || 'reward').toUpperCase();
   const total = balance?.available ?? balance?.balance ?? 0;
 
   return [
-    `Dear ${name}, you just redeemed a free ${label} at Builders Brew - enjoy every bite!`,
+    `Dear ${name}, you just redeemed a free ${label} at ${BRAND} - enjoy every bite!`,
     `Your points balance is now ${total}. Thanks for being part of the crew; your next reward is already brewing.`,
   ]
     .join('\n')
