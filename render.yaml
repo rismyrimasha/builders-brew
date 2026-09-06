@@ -9,7 +9,8 @@ services:
     name: builders-brew
     runtime: node
     region: singapore        # closest Render region to Sri Lanka; also: oregon, ohio, frankfurt
-    plan: starter            # always-on (~$7/mo). Use `free` to trial — it sleeps after ~15 min idle.
+    plan: free               # $0. Sleeps after ~15 min idle -> next request has a 30-50s cold start.
+                             # Upgrade to `starter` (~$7/mo) later for always-on.
     numInstances: 1          # keep at 1: the campaign queue runs in-process
     healthCheckPath: /api/health
     buildCommand: npm run install:all && npm run build --prefix client
