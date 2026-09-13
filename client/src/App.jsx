@@ -8,6 +8,7 @@ import StaffHome from './pages/staff/Home';
 import StaffCustomer from './pages/staff/Customer';
 
 import AdminOverview from './pages/admin/Overview';
+import AdminReports from './pages/admin/Reports';
 import AdminRewards from './pages/admin/Rewards';
 import AdminStaff from './pages/admin/Staff';
 import AdminCustomers from './pages/admin/Customers';
@@ -49,6 +50,7 @@ export default function App() {
         }
       >
         <Route index element={<AdminOverview />} />
+        <Route path="reports" element={<AdminReports />} />
         <Route path="rewards" element={<AdminRewards />} />
         <Route path="staff" element={<AdminStaff />} />
         <Route path="customers" element={<AdminCustomers />} />

@@ -99,6 +99,219 @@ router.get(
   })
 );
 
+// —— Reports (date-range activity + customer roster, for admin PDF/print export) ——
+const REPORT_ORDER_LIMIT = 1000;
+const REPORT_REDEMPTION_LIMIT = 1000;
+const REPORT_CUSTOMER_LIMIT = 1000;
+
+function parseReportDate(value, endOfDay) {
+  if (!value) return null;
+  const d = new Date(`${value}T${endOfDay ? '23:59:59.999' : '00:00:00.000'}`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function reportDateMatch(field, from, to) {
+  if (!from && !to) return {};
+  const range = {};
+  if (from) range.$gte = from;
+  if (to) range.$lte = to;
+  return { [field]: range };
+}
+
+router.get(
+  '/reports',
+  asyncHandler(async (req, res) => {
+    const from = parseReportDate(req.query.from, false);
+    const to = parseReportDate(req.query.to, true);
+
+    const earnMatch = reportDateMatch('created_at', from, to);
+    const redemptionMatch = { status: 'completed', ...reportDateMatch('completed_at', from, to) };
+
+    const [
+      earnedAgg,
+      redeemedAgg,
+      topRewards,
+      newCustomers,
+      servedCustomerIds,
+      orderCount,
+      redemptionCount,
+      orders,
+      redemptions,
+      earnedByCustomer,
+      redeemedByCustomer,
+      adjustedByCustomer,
+      pendingByCustomer,
+      customers,
+      customerTotal,
+    ] = await Promise.all([
+      EarnTransaction.aggregate([
+        { $match: earnMatch },
+        {
+          $group: {
+            _id: null,
+            points: { $sum: '$points_earned' },
+            orders: { $sum: 1 },
+            revenue: { $sum: '$amount_paid' },
+          },
+        },
+      ]),
+      RedemptionTransaction.aggregate([
+        { $match: redemptionMatch },
+        { $group: { _id: null, points: { $sum: '$points_spent' }, count: { $sum: 1 } } },
+      ]),
+      RedemptionTransaction.aggregate([
+        { $match: redemptionMatch },
+        { $group: { _id: '$reward_id', count: { $sum: 1 }, points: { $sum: '$points_spent' } } },
+        { $sort: { count: -1 } },
+        { $limit: 10 },
+        {
+          $lookup: {
+            from: 'rewards',
+            localField: '_id',
+            foreignField: '_id',
+            as: 'reward',
+          },
+        },
+        { $unwind: { path: '$reward', preserveNullAndEmptyArrays: true } },
+      ]),
+      Customer.countDocuments(reportDateMatch('created_at', from, to)),
+      EarnTransaction.distinct('customer_id', earnMatch),
+      EarnTransaction.countDocuments(earnMatch),
+      RedemptionTransaction.countDocuments(redemptionMatch),
+      EarnTransaction.find(earnMatch)
+        .populate('customer_id', 'name phone')
+        .populate('staff_id', 'name')
+        .sort({ created_at: -1 })
+        .limit(REPORT_ORDER_LIMIT)
+        .lean(),
+      RedemptionTransaction.find(redemptionMatch)
+        .populate('customer_id', 'name phone')
+        .populate('reward_id', 'name')
+        .populate('staff_id', 'name')
+        .sort({ completed_at: -1 })
+        .limit(REPORT_REDEMPTION_LIMIT)
+        .lean(),
+      // Lifetime per-customer aggregates (unscoped by date — the roster is a live snapshot).
+      EarnTransaction.aggregate([
+        {
+          $group: {
+            _id: '$customer_id',
+            points: { $sum: '$points_earned' },
+            orders: { $sum: 1 },
+            spend: { $sum: '$amount_paid' },
+          },
+        },
+      ]),
+      RedemptionTransaction.aggregate([
+        { $match: { status: 'completed' } },
+        { $group: { _id: '$customer_id', points: { $sum: '$points_spent' }, count: { $sum: 1 } } },
+      ]),
+      AdjustmentTransaction.aggregate([
+        { $group: { _id: '$customer_id', points: { $sum: '$points_delta' } } },
+      ]),
+      RedemptionTransaction.aggregate([
+        { $match: { status: 'pending' } },
+        { $group: { _id: '$customer_id', points: { $sum: '$points_spent' } } },
+      ]),
+      Customer.find().sort({ created_at: -1 }).limit(REPORT_CUSTOMER_LIMIT).lean(),
+      Customer.countDocuments(),
+    ]);
+
+    const orderTotals = earnedAgg[0] || { points: 0, orders: 0, revenue: 0 };
+    const redemptionTotals = redeemedAgg[0] || { points: 0, count: 0 };
+
+    const earnedMap = new Map(earnedByCustomer.map((r) => [String(r._id), r]));
+    const redeemedMap = new Map(redeemedByCustomer.map((r) => [String(r._id), r]));
+    const adjustedMap = new Map(adjustedByCustomer.map((r) => [String(r._id), r]));
+    const pendingMap = new Map(pendingByCustomer.map((r) => [String(r._id), r]));
+
+    const sumPoints = (rows) => rows.reduce((sum, r) => sum + (r.points || 0), 0);
+    const totalEarnedAllTime = sumPoints(earnedByCustomer);
+    const totalRedeemedAllTime = sumPoints(redeemedByCustomer);
+    const totalAdjustedAllTime = sumPoints(adjustedByCustomer);
+    const totalPendingAllTime = sumPoints(pendingByCustomer);
+    const pointsOutstanding =
+      totalEarnedAllTime + totalAdjustedAllTime - totalRedeemedAllTime - totalPendingAllTime;
+
+    const customerRows = customers.map((c) => {
+      const id = String(c._id);
+      const earned = earnedMap.get(id)?.points || 0;
+      const adjusted = adjustedMap.get(id)?.points || 0;
+      const redeemed = redeemedMap.get(id)?.points || 0;
+      const pending = pendingMap.get(id)?.points || 0;
+      const balance = earned + adjusted - redeemed;
+      return {
+        id: c._id,
+        name: c.name,
+        phone: c.phone,
+        created_at: c.created_at,
+        points_available: balance - pending,
+        lifetime_earned: earned,
+        lifetime_redeemed: redeemed,
+        orders_count: earnedMap.get(id)?.orders || 0,
+        redemptions_count: redeemedMap.get(id)?.count || 0,
+        total_spend: earnedMap.get(id)?.spend || 0,
+      };
+    });
+    customerRows.sort(
+      (a, b) => b.points_available - a.points_available || a.name.localeCompare(b.name)
+    );
+
+    res.json({
+      range: { from: from ? from.toISOString() : null, to: to ? to.toISOString() : null },
+      activity: {
+        summary: {
+          orders_logged: orderTotals.orders,
+          revenue: orderTotals.revenue,
+          points_issued: orderTotals.points,
+          redemptions_count: redemptionTotals.count,
+          points_redeemed: redemptionTotals.points,
+          new_customers: newCustomers,
+          unique_customers_served: servedCustomerIds.length,
+          avg_order_value: orderTotals.orders ? orderTotals.revenue / orderTotals.orders : 0,
+        },
+        top_rewards: topRewards.map((r) => ({
+          reward_id: r._id,
+          name: r.reward?.name || 'Unknown',
+          count: r.count,
+          points: r.points,
+        })),
+        orders: orders.map((o) => ({
+          id: o._id,
+          created_at: o.created_at,
+          customer_name: o.customer_id?.name || 'Unknown',
+          customer_phone: o.customer_id?.phone || '',
+          amount_paid: o.amount_paid,
+          points_earned: o.points_earned,
+          order_ref: o.order_ref || '',
+          staff_name: o.staff_id?.name || 'Unknown',
+        })),
+        orders_truncated: orderCount > orders.length,
+        redemptions: redemptions.map((r) => ({
+          id: r._id,
+          created_at: r.completed_at || r.created_at,
+          customer_name: r.customer_id?.name || 'Unknown',
+          customer_phone: r.customer_id?.phone || '',
+          reward_name: r.reward_id?.name || 'Unknown',
+          points_spent: r.points_spent,
+          status: r.status,
+          redemption_code: r.redemption_code,
+          staff_name: r.staff_id?.name || 'Unknown',
+        })),
+        redemptions_truncated: redemptionCount > redemptions.length,
+      },
+      customers: {
+        summary: {
+          total_customers: customerTotal,
+          points_outstanding: pointsOutstanding,
+        },
+        list: customerRows,
+        truncated: customerTotal > customerRows.length,
+      },
+    });
+  })
+);
+
 // —— Rewards CRUD ——
 router.get(
   '/rewards',

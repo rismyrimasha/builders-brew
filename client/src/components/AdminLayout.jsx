@@ -6,6 +6,7 @@ import { BrandMark } from './ui';
 
 const links = [
   { to: '/admin', label: 'Overview', end: true },
+  { to: '/admin/reports', label: 'Reports' },
   { to: '/admin/rewards', label: 'Rewards' },
   { to: '/admin/staff', label: 'Staff' },
   { to: '/admin/customers', label: 'Customers' },
@@ -73,9 +74,9 @@ export default function AdminLayout() {
   );
 
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[240px_1fr]">
+    <div className="admin-shell min-h-dvh lg:grid lg:grid-cols-[240px_1fr]">
       {/* ---- Mobile / tablet: top bar + collapsible menu ---- */}
-      <div className="sticky top-0 z-40 lg:hidden">
+      <div className="sticky top-0 z-40 print:hidden lg:hidden">
         <header className="flex items-center justify-between gap-3 border-b border-ink-700 bg-ink-900/95 px-4 py-3 backdrop-blur">
           <div className="min-w-0">
             <BrandMark size="sm" />
@@ -112,7 +113,7 @@ export default function AdminLayout() {
       )}
 
       {/* ---- Desktop: fixed left sidebar ---- */}
-      <aside className="hidden border-r border-ink-700 bg-ink-900/80 lg:flex lg:flex-col">
+      <aside className="hidden border-r border-ink-700 bg-ink-900/80 print:hidden lg:flex lg:flex-col">
         <div className="px-5 py-5">
           <BrandMark size="sm" />
           {identity}
