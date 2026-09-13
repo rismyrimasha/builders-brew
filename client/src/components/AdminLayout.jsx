@@ -113,12 +113,12 @@ export default function AdminLayout() {
       )}
 
       {/* ---- Desktop: fixed left sidebar ---- */}
-      <aside className="hidden border-r border-ink-700 bg-ink-900/80 print:hidden lg:flex lg:flex-col">
+      <aside className="hidden border-r border-ink-700 bg-ink-900/80 print:hidden lg:sticky lg:top-0 lg:flex lg:h-dvh lg:flex-col lg:self-start">
         <div className="px-5 py-5">
           <BrandMark size="sm" />
           {identity}
         </div>
-        <div className="flex-1 px-3">{navList}</div>
+        <div className="flex-1 overflow-y-auto px-3">{navList}</div>
         <div className="flex flex-col gap-2 px-3 pb-5">{sessionButtons}</div>
       </aside>
 

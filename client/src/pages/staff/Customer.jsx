@@ -224,11 +224,12 @@ export default function StaffCustomer() {
             </p>
           )}
           <label className="block space-y-2">
-            <span className="text-sm text-muted">Order ref (optional)</span>
+            <span className="text-sm text-muted">Order ref</span>
             <input
               className="field !min-h-14"
               value={orderRef}
               onChange={(e) => setOrderRef(e.target.value)}
+              required
             />
           </label>
           <button

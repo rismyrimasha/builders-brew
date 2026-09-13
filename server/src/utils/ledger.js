@@ -73,7 +73,8 @@ export function calculatePointsEarned(amountPaid, settings) {
   return Math.floor(amountPaid / 100) * points_per_100;
 }
 
-export async function getCustomerLedger(customerId, limit = 50) {
+/** Full merged, sorted ledger up to fetchCap entries per transaction type. */
+async function buildLedgerEntries(customerId, fetchCap) {
   const oid = toObjectId(customerId);
   await expireStaleRedemptions(oid);
 
@@ -81,18 +82,18 @@ export async function getCustomerLedger(customerId, limit = 50) {
     EarnTransaction.find({ customer_id: oid })
       .populate('staff_id', 'name')
       .sort({ created_at: -1 })
-      .limit(limit)
+      .limit(fetchCap)
       .lean(),
     RedemptionTransaction.find({ customer_id: oid })
       .populate('reward_id', 'name type cash_value')
       .populate('staff_id', 'name')
       .sort({ created_at: -1 })
-      .limit(limit)
+      .limit(fetchCap)
       .lean(),
     AdjustmentTransaction.find({ customer_id: oid })
       .populate('admin_id', 'name')
       .sort({ created_at: -1 })
-      .limit(limit)
+      .limit(fetchCap)
       .lean(),
   ]);
 
@@ -129,5 +130,24 @@ export async function getCustomerLedger(customerId, limit = 50) {
   ];
 
   entries.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  return entries;
+}
+
+export async function getCustomerLedger(customerId, limit = 50) {
+  const entries = await buildLedgerEntries(customerId, limit);
   return entries.slice(0, limit);
+}
+
+/**
+ * Paginated ledger for "Load more" UIs. Merges up to `fetchCap` of each
+ * transaction type (earn/redemption/adjustment) before slicing — cheap at this
+ * app's scale, but a customer with more than `fetchCap` of any single type
+ * could see `has_more` read false near the very end of their history.
+ */
+export async function getCustomerLedgerPage(customerId, { skip = 0, limit = 10, fetchCap = 500 } = {}) {
+  const entries = await buildLedgerEntries(customerId, fetchCap);
+  return {
+    entries: entries.slice(skip, skip + limit),
+    has_more: entries.length > skip + limit,
+  };
 }

@@ -6,7 +6,7 @@ const earnTransactionSchema = new mongoose.Schema(
     amount_paid: { type: Number, required: true, min: 0 },
     points_earned: { type: Number, required: true, min: 0 },
     staff_id: { type: mongoose.Schema.Types.ObjectId, ref: 'StaffAccount', required: true },
-    order_ref: { type: String, default: '' },
+    order_ref: { type: String, required: true, trim: true },
   },
   { timestamps: { createdAt: 'created_at', updatedAt: false } }
 );

@@ -14,7 +14,7 @@ import { Campaign } from '../models/Campaign.js';
 import { MessageLog } from '../models/MessageLog.js';
 import { getNotifyStatus, publicSmsStatus } from '../services/notifyLk.js';
 import { estimateSmsSegments, queueCampaign, sendAndLog } from '../services/sms.js';
-import { getCustomerBalance, getCustomerLedger } from '../utils/ledger.js';
+import { getCustomerBalance, getCustomerLedgerPage } from '../utils/ledger.js';
 import { validatePassword } from '../utils/password.js';
 import { validatePhone } from '../utils/phone.js';
 
@@ -28,6 +28,13 @@ function monthRange() {
   const end = new Date(start);
   end.setMonth(end.getMonth() + 1);
   return { start, end };
+}
+
+/** skip/limit pagination for "Load more" lists — caller decides the max limit. */
+function parsePage(req, { maxLimit = 100 } = {}) {
+  const skip = Math.max(0, parseInt(req.query.skip, 10) || 0);
+  const limit = Math.min(maxLimit, Math.max(1, parseInt(req.query.limit, 10) || 10));
+  return { skip, limit };
 }
 
 router.get(
@@ -100,9 +107,10 @@ router.get(
 );
 
 // —— Reports (date-range activity + customer roster, for admin PDF/print export) ——
-const REPORT_ORDER_LIMIT = 1000;
-const REPORT_REDEMPTION_LIMIT = 1000;
-const REPORT_CUSTOMER_LIMIT = 1000;
+// Detail lists (orders/redemptions/customers) are paginated with skip/limit; the
+// Reports UI uses small pages for on-screen "Load more", and a large limit when
+// building a PDF/print export so the export always covers the full range.
+const REPORT_PAGE_MAX = 1000;
 
 function parseReportDate(value, endOfDay) {
   if (!value) return null;
@@ -118,12 +126,18 @@ function reportDateMatch(field, from, to) {
   return { [field]: range };
 }
 
-router.get(
-  '/reports',
-  asyncHandler(async (req, res) => {
-    const from = parseReportDate(req.query.from, false);
-    const to = parseReportDate(req.query.to, true);
+function reportRange(req) {
+  return { from: parseReportDate(req.query.from, false), to: parseReportDate(req.query.to, true) };
+}
 
+function reportPage(req) {
+  return parsePage(req, { maxLimit: REPORT_PAGE_MAX });
+}
+
+router.get(
+  '/reports/summary',
+  asyncHandler(async (req, res) => {
+    const { from, to } = reportRange(req);
     const earnMatch = reportDateMatch('created_at', from, to);
     const redemptionMatch = { status: 'completed', ...reportDateMatch('completed_at', from, to) };
 
@@ -133,15 +147,10 @@ router.get(
       topRewards,
       newCustomers,
       servedCustomerIds,
-      orderCount,
-      redemptionCount,
-      orders,
-      redemptions,
       earnedByCustomer,
       redeemedByCustomer,
       adjustedByCustomer,
       pendingByCustomer,
-      customers,
       customerTotal,
     ] = await Promise.all([
       EarnTransaction.aggregate([
@@ -176,76 +185,170 @@ router.get(
       ]),
       Customer.countDocuments(reportDateMatch('created_at', from, to)),
       EarnTransaction.distinct('customer_id', earnMatch),
-      EarnTransaction.countDocuments(earnMatch),
-      RedemptionTransaction.countDocuments(redemptionMatch),
-      EarnTransaction.find(earnMatch)
-        .populate('customer_id', 'name phone')
-        .populate('staff_id', 'name')
-        .sort({ created_at: -1 })
-        .limit(REPORT_ORDER_LIMIT)
-        .lean(),
-      RedemptionTransaction.find(redemptionMatch)
-        .populate('customer_id', 'name phone')
-        .populate('reward_id', 'name')
-        .populate('staff_id', 'name')
-        .sort({ completed_at: -1 })
-        .limit(REPORT_REDEMPTION_LIMIT)
-        .lean(),
       // Lifetime per-customer aggregates (unscoped by date — the roster is a live snapshot).
-      EarnTransaction.aggregate([
-        {
-          $group: {
-            _id: '$customer_id',
-            points: { $sum: '$points_earned' },
-            orders: { $sum: 1 },
-            spend: { $sum: '$amount_paid' },
-          },
-        },
-      ]),
+      EarnTransaction.aggregate([{ $group: { _id: null, points: { $sum: '$points_earned' } } }]),
       RedemptionTransaction.aggregate([
         { $match: { status: 'completed' } },
-        { $group: { _id: '$customer_id', points: { $sum: '$points_spent' }, count: { $sum: 1 } } },
+        { $group: { _id: null, points: { $sum: '$points_spent' } } },
       ]),
-      AdjustmentTransaction.aggregate([
-        { $group: { _id: '$customer_id', points: { $sum: '$points_delta' } } },
-      ]),
+      AdjustmentTransaction.aggregate([{ $group: { _id: null, points: { $sum: '$points_delta' } } }]),
       RedemptionTransaction.aggregate([
         { $match: { status: 'pending' } },
-        { $group: { _id: '$customer_id', points: { $sum: '$points_spent' } } },
+        { $group: { _id: null, points: { $sum: '$points_spent' } } },
       ]),
-      Customer.find().sort({ created_at: -1 }).limit(REPORT_CUSTOMER_LIMIT).lean(),
       Customer.countDocuments(),
     ]);
 
     const orderTotals = earnedAgg[0] || { points: 0, orders: 0, revenue: 0 };
     const redemptionTotals = redeemedAgg[0] || { points: 0, count: 0 };
+    const pointsOutstanding =
+      (earnedByCustomer[0]?.points || 0) +
+      (adjustedByCustomer[0]?.points || 0) -
+      (redeemedByCustomer[0]?.points || 0) -
+      (pendingByCustomer[0]?.points || 0);
+
+    res.json({
+      range: { from: from ? from.toISOString() : null, to: to ? to.toISOString() : null },
+      activity: {
+        orders_logged: orderTotals.orders,
+        revenue: orderTotals.revenue,
+        points_issued: orderTotals.points,
+        redemptions_count: redemptionTotals.count,
+        points_redeemed: redemptionTotals.points,
+        new_customers: newCustomers,
+        unique_customers_served: servedCustomerIds.length,
+        avg_order_value: orderTotals.orders ? orderTotals.revenue / orderTotals.orders : 0,
+      },
+      top_rewards: topRewards.map((r) => ({
+        reward_id: r._id,
+        name: r.reward?.name || 'Unknown',
+        count: r.count,
+        points: r.points,
+      })),
+      customers: {
+        total_customers: customerTotal,
+        points_outstanding: pointsOutstanding,
+      },
+    });
+  })
+);
+
+router.get(
+  '/reports/orders',
+  asyncHandler(async (req, res) => {
+    const { from, to } = reportRange(req);
+    const { skip, limit } = reportPage(req);
+    const earnMatch = reportDateMatch('created_at', from, to);
+
+    const rows = await EarnTransaction.find(earnMatch)
+      .populate('customer_id', 'name phone')
+      .populate('staff_id', 'name')
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+      .lean();
+
+    const has_more = rows.length > limit;
+    res.json({
+      orders: rows.slice(0, limit).map((o) => ({
+        id: o._id,
+        created_at: o.created_at,
+        customer_name: o.customer_id?.name || 'Unknown',
+        customer_phone: o.customer_id?.phone || '',
+        amount_paid: o.amount_paid,
+        points_earned: o.points_earned,
+        order_ref: o.order_ref || '',
+        staff_name: o.staff_id?.name || 'Unknown',
+      })),
+      has_more,
+    });
+  })
+);
+
+router.get(
+  '/reports/redemptions',
+  asyncHandler(async (req, res) => {
+    const { from, to } = reportRange(req);
+    const { skip, limit } = reportPage(req);
+    const redemptionMatch = { status: 'completed', ...reportDateMatch('completed_at', from, to) };
+
+    const rows = await RedemptionTransaction.find(redemptionMatch)
+      .populate('customer_id', 'name phone')
+      .populate('reward_id', 'name')
+      .populate('staff_id', 'name')
+      .sort({ completed_at: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+      .lean();
+
+    const has_more = rows.length > limit;
+    res.json({
+      redemptions: rows.slice(0, limit).map((r) => ({
+        id: r._id,
+        created_at: r.completed_at || r.created_at,
+        customer_name: r.customer_id?.name || 'Unknown',
+        customer_phone: r.customer_id?.phone || '',
+        reward_name: r.reward_id?.name || 'Unknown',
+        points_spent: r.points_spent,
+        status: r.status,
+        redemption_code: r.redemption_code,
+        staff_name: r.staff_id?.name || 'Unknown',
+      })),
+      has_more,
+    });
+  })
+);
+
+router.get(
+  '/reports/customers',
+  asyncHandler(async (req, res) => {
+    const { skip, limit } = reportPage(req);
+
+    // Sort key (points_available) is computed, not a DB field, so this needs the
+    // full roster + full per-customer aggregates before it can slice a page.
+    const [customers, earnedByCustomer, redeemedByCustomer, adjustedByCustomer, pendingByCustomer] =
+      await Promise.all([
+        Customer.find().lean(),
+        EarnTransaction.aggregate([
+          {
+            $group: {
+              _id: '$customer_id',
+              points: { $sum: '$points_earned' },
+              orders: { $sum: 1 },
+              spend: { $sum: '$amount_paid' },
+            },
+          },
+        ]),
+        RedemptionTransaction.aggregate([
+          { $match: { status: 'completed' } },
+          { $group: { _id: '$customer_id', points: { $sum: '$points_spent' }, count: { $sum: 1 } } },
+        ]),
+        AdjustmentTransaction.aggregate([
+          { $group: { _id: '$customer_id', points: { $sum: '$points_delta' } } },
+        ]),
+        RedemptionTransaction.aggregate([
+          { $match: { status: 'pending' } },
+          { $group: { _id: '$customer_id', points: { $sum: '$points_spent' } } },
+        ]),
+      ]);
 
     const earnedMap = new Map(earnedByCustomer.map((r) => [String(r._id), r]));
     const redeemedMap = new Map(redeemedByCustomer.map((r) => [String(r._id), r]));
     const adjustedMap = new Map(adjustedByCustomer.map((r) => [String(r._id), r]));
     const pendingMap = new Map(pendingByCustomer.map((r) => [String(r._id), r]));
 
-    const sumPoints = (rows) => rows.reduce((sum, r) => sum + (r.points || 0), 0);
-    const totalEarnedAllTime = sumPoints(earnedByCustomer);
-    const totalRedeemedAllTime = sumPoints(redeemedByCustomer);
-    const totalAdjustedAllTime = sumPoints(adjustedByCustomer);
-    const totalPendingAllTime = sumPoints(pendingByCustomer);
-    const pointsOutstanding =
-      totalEarnedAllTime + totalAdjustedAllTime - totalRedeemedAllTime - totalPendingAllTime;
-
-    const customerRows = customers.map((c) => {
+    const rows = customers.map((c) => {
       const id = String(c._id);
       const earned = earnedMap.get(id)?.points || 0;
       const adjusted = adjustedMap.get(id)?.points || 0;
       const redeemed = redeemedMap.get(id)?.points || 0;
       const pending = pendingMap.get(id)?.points || 0;
-      const balance = earned + adjusted - redeemed;
       return {
         id: c._id,
         name: c.name,
         phone: c.phone,
         created_at: c.created_at,
-        points_available: balance - pending,
+        points_available: earned + adjusted - redeemed - pending,
         lifetime_earned: earned,
         lifetime_redeemed: redeemed,
         orders_count: earnedMap.get(id)?.orders || 0,
@@ -253,61 +356,11 @@ router.get(
         total_spend: earnedMap.get(id)?.spend || 0,
       };
     });
-    customerRows.sort(
-      (a, b) => b.points_available - a.points_available || a.name.localeCompare(b.name)
-    );
+    rows.sort((a, b) => b.points_available - a.points_available || a.name.localeCompare(b.name));
 
     res.json({
-      range: { from: from ? from.toISOString() : null, to: to ? to.toISOString() : null },
-      activity: {
-        summary: {
-          orders_logged: orderTotals.orders,
-          revenue: orderTotals.revenue,
-          points_issued: orderTotals.points,
-          redemptions_count: redemptionTotals.count,
-          points_redeemed: redemptionTotals.points,
-          new_customers: newCustomers,
-          unique_customers_served: servedCustomerIds.length,
-          avg_order_value: orderTotals.orders ? orderTotals.revenue / orderTotals.orders : 0,
-        },
-        top_rewards: topRewards.map((r) => ({
-          reward_id: r._id,
-          name: r.reward?.name || 'Unknown',
-          count: r.count,
-          points: r.points,
-        })),
-        orders: orders.map((o) => ({
-          id: o._id,
-          created_at: o.created_at,
-          customer_name: o.customer_id?.name || 'Unknown',
-          customer_phone: o.customer_id?.phone || '',
-          amount_paid: o.amount_paid,
-          points_earned: o.points_earned,
-          order_ref: o.order_ref || '',
-          staff_name: o.staff_id?.name || 'Unknown',
-        })),
-        orders_truncated: orderCount > orders.length,
-        redemptions: redemptions.map((r) => ({
-          id: r._id,
-          created_at: r.completed_at || r.created_at,
-          customer_name: r.customer_id?.name || 'Unknown',
-          customer_phone: r.customer_id?.phone || '',
-          reward_name: r.reward_id?.name || 'Unknown',
-          points_spent: r.points_spent,
-          status: r.status,
-          redemption_code: r.redemption_code,
-          staff_name: r.staff_id?.name || 'Unknown',
-        })),
-        redemptions_truncated: redemptionCount > redemptions.length,
-      },
-      customers: {
-        summary: {
-          total_customers: customerTotal,
-          points_outstanding: pointsOutstanding,
-        },
-        list: customerRows,
-        truncated: customerTotal > customerRows.length,
-      },
+      customers: rows.slice(skip, skip + limit),
+      has_more: rows.length > skip + limit,
     });
   })
 );
@@ -532,9 +585,16 @@ router.get(
         }
       : {};
 
-    const customers = await Customer.find(filter).sort({ created_at: -1 }).limit(50).lean();
-    const withBalance = await Promise.all(
-      customers.map(async (c) => ({
+    const { skip, limit } = parsePage(req);
+    const rows = await Customer.find(filter)
+      .sort({ created_at: -1 })
+      .skip(skip)
+      .limit(limit + 1)
+      .lean();
+
+    const has_more = rows.length > limit;
+    const customers = await Promise.all(
+      rows.slice(0, limit).map(async (c) => ({
         id: c._id,
         name: c.name,
         phone: c.phone,
@@ -543,7 +603,7 @@ router.get(
       }))
     );
 
-    res.json({ customers: withBalance });
+    res.json({ customers, has_more });
   })
 );
 
@@ -553,8 +613,9 @@ router.get(
     const customer = await Customer.findById(req.params.id).lean();
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
 
+    const { skip, limit } = parsePage(req);
     const balance = await getCustomerBalance(customer._id);
-    const ledger = await getCustomerLedger(customer._id, 100);
+    const { entries: ledger, has_more } = await getCustomerLedgerPage(customer._id, { skip, limit });
 
     res.json({
       customer: {
@@ -565,6 +626,7 @@ router.get(
       },
       balance,
       ledger,
+      has_more,
     });
   })
 );
@@ -730,24 +792,28 @@ router.get(
   asyncHandler(async (req, res) => {
     const kind = String(req.query.kind || '').trim();
     const filter = kind ? { kind } : {};
-    const logs = await MessageLog.find(filter)
+    const { skip, limit } = parsePage(req);
+    const rows = await MessageLog.find(filter)
       .populate('customer_id', 'name phone')
       .sort({ created_at: -1 })
-      .limit(40)
+      .skip(skip)
+      .limit(limit + 1)
       .lean();
-    res.json({ logs });
+    res.json({ logs: rows.slice(0, limit), has_more: rows.length > limit });
   })
 );
 
 router.get(
   '/campaigns',
   asyncHandler(async (req, res) => {
-    const campaigns = await Campaign.find()
+    const { skip, limit } = parsePage(req);
+    const rows = await Campaign.find()
       .populate('created_by', 'name')
       .sort({ created_at: -1 })
-      .limit(30)
+      .skip(skip)
+      .limit(limit + 1)
       .lean();
-    res.json({ campaigns });
+    res.json({ campaigns: rows.slice(0, limit), has_more: rows.length > limit });
   })
 );
 

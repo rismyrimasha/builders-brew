@@ -1,13 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import api, { getErrorMessage } from '../../lib/api';
 import {
   ErrorBanner,
+  LoadMoreButton,
   PlateTag,
   PointsNumber,
   Spinner,
   SuccessBanner,
 } from '../../components/ui';
+
+const PAGE_SIZE = 10;
 
 export default function AdminCustomers() {
   const queryClient = useQueryClient();
@@ -18,16 +21,29 @@ export default function AdminCustomers() {
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
 
-  const listQuery = useQuery({
+  const listQuery = useInfiniteQuery({
     queryKey: ['admin-customers', q],
-    queryFn: async () => (await api.get('/admin/customers', { params: { q } })).data,
+    queryFn: async ({ pageParam }) =>
+      (await api.get('/admin/customers', { params: { q, skip: pageParam, limit: PAGE_SIZE } })).data,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => (lastPage.has_more ? pages.length * PAGE_SIZE : undefined),
   });
+  const customers = listQuery.data?.pages.flatMap((p) => p.customers) || [];
 
-  const detailQuery = useQuery({
+  const detailQuery = useInfiniteQuery({
     queryKey: ['admin-customer', selectedId],
-    queryFn: async () => (await api.get(`/admin/customers/${selectedId}`)).data,
+    queryFn: async ({ pageParam }) =>
+      (
+        await api.get(`/admin/customers/${selectedId}`, {
+          params: { skip: pageParam, limit: PAGE_SIZE },
+        })
+      ).data,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => (lastPage.has_more ? pages.length * PAGE_SIZE : undefined),
     enabled: !!selectedId,
   });
+  const customerInfo = detailQuery.data?.pages?.[0];
+  const ledger = detailQuery.data?.pages.flatMap((p) => p.ledger) || [];
 
   const adjust = useMutation({
     mutationFn: async () =>
@@ -76,25 +92,33 @@ export default function AdminCustomers() {
           {listQuery.isLoading ? (
             <Spinner />
           ) : (
-            <ul className="space-y-2">
-              {listQuery.data?.customers?.map((c) => (
-                <li key={c.id}>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedId(c.id)}
-                    className={`surface flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition ${
-                      selectedId === c.id ? 'border-gold-500' : 'hover:border-gold-700'
-                    }`}
-                  >
-                    <div>
-                      <p className="text-cream-50">{c.name}</p>
-                      <p className="text-sm text-muted">{c.phone}</p>
-                    </div>
-                    <PointsNumber value={c.balance.available} className="text-2xl" />
-                  </button>
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul className="space-y-2">
+                {customers.map((c) => (
+                  <li key={c.id}>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedId(c.id)}
+                      className={`surface flex w-full items-center justify-between gap-3 px-4 py-4 text-left transition ${
+                        selectedId === c.id ? 'border-gold-500' : 'hover:border-gold-700'
+                      }`}
+                    >
+                      <div>
+                        <p className="text-cream-50">{c.name}</p>
+                        <p className="text-sm text-muted">{c.phone}</p>
+                      </div>
+                      <PointsNumber value={c.balance.available} className="text-2xl" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+              <LoadMoreButton
+                className="mt-3"
+                hasMore={listQuery.hasNextPage}
+                isLoading={listQuery.isFetchingNextPage}
+                onClick={() => listQuery.fetchNextPage()}
+              />
+            </>
           )}
         </div>
 
@@ -106,17 +130,14 @@ export default function AdminCustomers() {
           ) : (
             <>
               <h2 className="font-display text-3xl text-cream-50">
-                {detailQuery.data.customer.name}
+                {customerInfo.customer.name}
               </h2>
-              <p className="text-muted">{detailQuery.data.customer.phone}</p>
+              <p className="text-muted">{customerInfo.customer.phone}</p>
               <p className="mt-3 text-sm text-muted">
                 Available{' '}
-                <PointsNumber
-                  value={detailQuery.data.balance.available}
-                  className="text-base"
-                />{' '}
+                <PointsNumber value={customerInfo.balance.available} className="text-base" />{' '}
                 · Ledger balance{' '}
-                <PointsNumber value={detailQuery.data.balance.balance} className="text-base" />
+                <PointsNumber value={customerInfo.balance.balance} className="text-base" />
               </p>
 
               <div className="mt-4 space-y-2">
@@ -153,7 +174,7 @@ export default function AdminCustomers() {
               </form>
 
               <ul className="mt-6 max-h-96 space-y-2 overflow-y-auto">
-                {detailQuery.data.ledger.map((entry) => (
+                {ledger.map((entry) => (
                   <li
                     key={`${entry.kind}-${entry.id}`}
                     className="flex justify-between gap-3 border-t border-ink-700 py-2 text-sm"
@@ -180,6 +201,12 @@ export default function AdminCustomers() {
                   </li>
                 ))}
               </ul>
+              <LoadMoreButton
+                className="mt-3"
+                hasMore={detailQuery.hasNextPage}
+                isLoading={detailQuery.isFetchingNextPage}
+                onClick={() => detailQuery.fetchNextPage()}
+              />
             </>
           )}
         </div>

@@ -1,8 +1,16 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import api, { getErrorMessage } from '../../lib/api';
 import { useAuth } from '../../lib/auth';
-import { ErrorBanner, PlateTag, Spinner, SuccessBanner } from '../../components/ui';
+import {
+  ErrorBanner,
+  LoadMoreButton,
+  PlateTag,
+  Spinner,
+  SuccessBanner,
+} from '../../components/ui';
+
+const PAGE_SIZE = 10;
 
 function formatWhen(value) {
   if (!value) return '';
@@ -80,17 +88,27 @@ export default function AdminMessages() {
     enabled: !canSend,
   });
 
-  const campaignsQuery = useQuery({
+  const campaignsQuery = useInfiniteQuery({
     queryKey: ['admin-campaigns'],
-    queryFn: async () => (await api.get('/admin/campaigns')).data,
+    queryFn: async ({ pageParam }) =>
+      (await api.get('/admin/campaigns', { params: { skip: pageParam, limit: PAGE_SIZE } })).data,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => (lastPage.has_more ? pages.length * PAGE_SIZE : undefined),
     refetchInterval: (query) =>
-      query.state.data?.campaigns?.some((c) => c.status === 'sending') ? 2500 : false,
+      query.state.data?.pages?.some((p) => p.campaigns.some((c) => c.status === 'sending'))
+        ? 2500
+        : false,
   });
+  const campaigns = campaignsQuery.data?.pages.flatMap((p) => p.campaigns) || [];
 
-  const logsQuery = useQuery({
+  const logsQuery = useInfiniteQuery({
     queryKey: ['admin-sms-logs'],
-    queryFn: async () => (await api.get('/admin/sms/logs')).data,
+    queryFn: async ({ pageParam }) =>
+      (await api.get('/admin/sms/logs', { params: { skip: pageParam, limit: PAGE_SIZE } })).data,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage, pages) => (lastPage.has_more ? pages.length * PAGE_SIZE : undefined),
   });
+  const logs = logsQuery.data?.pages.flatMap((p) => p.logs) || [];
 
   useEffect(() => {
     if (!canSend) return undefined;
@@ -292,22 +310,30 @@ export default function AdminMessages() {
         <h2 className="font-display text-2xl text-cream-50">Campaigns</h2>
         {campaignsQuery.isLoading ? (
           <Spinner />
-        ) : campaignsQuery.data?.campaigns?.length ? (
-          <ul className="mt-4 space-y-3">
-            {campaignsQuery.data.campaigns.map((c) => (
-              <li key={c._id} className="border-t border-ink-700 pt-3 first:border-t-0 first:pt-0">
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <p className="text-cream-50">{c.title}</p>
-                  <p className={`text-sm ${statusClass(c.status)}`}>{c.status}</p>
-                </div>
-                <p className="mt-1 text-sm text-muted">{c.body}</p>
-                <p className="mt-1 text-xs text-muted">
-                  {c.sent}/{c.total} sent · {c.failed} failed · {c.skipped} skipped ·{' '}
-                  {formatWhen(c.created_at)}
-                </p>
-              </li>
-            ))}
-          </ul>
+        ) : campaigns.length ? (
+          <>
+            <ul className="mt-4 space-y-3">
+              {campaigns.map((c) => (
+                <li key={c._id} className="border-t border-ink-700 pt-3 first:border-t-0 first:pt-0">
+                  <div className="flex flex-wrap items-baseline justify-between gap-2">
+                    <p className="text-cream-50">{c.title}</p>
+                    <p className={`text-sm ${statusClass(c.status)}`}>{c.status}</p>
+                  </div>
+                  <p className="mt-1 text-sm text-muted">{c.body}</p>
+                  <p className="mt-1 text-xs text-muted">
+                    {c.sent}/{c.total} sent · {c.failed} failed · {c.skipped} skipped ·{' '}
+                    {formatWhen(c.created_at)}
+                  </p>
+                </li>
+              ))}
+            </ul>
+            <LoadMoreButton
+              className="mt-4"
+              hasMore={campaignsQuery.hasNextPage}
+              isLoading={campaignsQuery.isFetchingNextPage}
+              onClick={() => campaignsQuery.fetchNextPage()}
+            />
+          </>
         ) : (
           <p className="mt-4 text-muted">No broadcasts yet.</p>
         )}
@@ -317,9 +343,10 @@ export default function AdminMessages() {
         <h2 className="font-display text-2xl text-cream-50">Recent SMS</h2>
         {logsQuery.isLoading ? (
           <Spinner />
-        ) : logsQuery.data?.logs?.length ? (
+        ) : logs.length ? (
+          <>
           <ul className="mt-4 space-y-3">
-            {logsQuery.data.logs.map((log) => (
+            {logs.map((log) => (
               <li key={log._id} className="border-t border-ink-700 pt-3 first:border-t-0 first:pt-0">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
                   <p className="text-sm text-cream-50">
@@ -333,6 +360,13 @@ export default function AdminMessages() {
               </li>
             ))}
           </ul>
+          <LoadMoreButton
+            className="mt-4"
+            hasMore={logsQuery.hasNextPage}
+            isLoading={logsQuery.isFetchingNextPage}
+            onClick={() => logsQuery.fetchNextPage()}
+          />
+          </>
         ) : (
           <p className="mt-4 text-muted">No SMS logs yet. Send a test to your phone first.</p>
         )}

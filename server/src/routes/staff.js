@@ -145,13 +145,15 @@ router.get(
 router.post(
   '/orders',
   asyncHandler(async (req, res) => {
-    const { customer_id, amount_paid, order_ref } = req.body;
+    const { customer_id, amount_paid } = req.body;
+    const order_ref = String(req.body.order_ref || '').trim();
     const amount = Number(amount_paid);
 
     if (!customer_id) return res.status(400).json({ error: 'customer_id is required' });
     if (!Number.isFinite(amount) || amount <= 0) {
       return res.status(400).json({ error: 'Enter a valid amount paid' });
     }
+    if (!order_ref) return res.status(400).json({ error: 'Order ref is required' });
 
     const customer = await Customer.findById(customer_id);
     if (!customer) return res.status(404).json({ error: 'Customer not found' });
@@ -164,7 +166,7 @@ router.post(
       amount_paid: amount,
       points_earned: points,
       staff_id: req.user.id,
-      order_ref: order_ref || '',
+      order_ref,
     });
 
     const profile = await buildCustomerProfile(customer);

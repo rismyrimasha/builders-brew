@@ -67,6 +67,20 @@ export function PointsNumber({ value, className = '' }) {
   );
 }
 
+export function LoadMoreButton({ hasMore, isLoading, onClick, className = '' }) {
+  if (!hasMore) return null;
+  return (
+    <button
+      type="button"
+      className={`btn-ghost w-full text-sm ${className}`}
+      onClick={onClick}
+      disabled={isLoading}
+    >
+      {isLoading ? 'Loading…' : 'Load more'}
+    </button>
+  );
+}
+
 export function Modal({ open, onClose, title, children }) {
   if (!open) return null;
   return (
